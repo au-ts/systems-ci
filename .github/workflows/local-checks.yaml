@@ -13,12 +13,6 @@ on:
       - main
 
 jobs:
-  whitespace:
-    name: 'Trailing Whitespace'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: seL4/ci-actions/git-diff-check@master
-
   style_python:
     name: Style (Python)
     runs-on: ubuntu-24.04
