@@ -28,10 +28,13 @@ from .backends import (
     TeeOut,
     OUTPUT,
 )
-from ci.common import TestConfig, loader_img_path
-
-TestFunction = Callable[[HardwareBackend, TestConfig], Awaitable[None]]
-BackendFunction = Callable[[TestConfig, Path], HardwareBackend]
+from .structs import (
+    TestConfig,
+    TestMetadata,
+    TestFunction,
+    BackendFunction,
+    LoaderImgFunction,
+)
 
 
 async def _watch_stdout_inactivity(
@@ -196,14 +199,13 @@ ResultKind = Literal["pass", "fail", "not_run", "retry", "interrupted"]
 
 def run_test_config(
     test_config: TestConfig,
-    test_fn: TestFunction,
-    backend_fn: BackendFunction,
+    test_metadata: TestMetadata,
     logs_dir: Optional[Path] = None,
-    loader_img_fn: Optional[Path] = None,
+    loader_img_override: Optional[Path] = None,
 ) -> ResultKind:
 
-    loader_img = loader_img_fn or loader_img_path(test_config)
-    backend = backend_fn(test_config, loader_img)
+    loader_img = loader_img_override or test_metadata.loader_img_fn(test_config)
+    backend = test_metadata.backend_fn(test_config, loader_img)
 
     if logs_dir:
         log_file = (
@@ -223,9 +225,9 @@ def run_test_config(
         with log_file_cm:
             asyncio.run(
                 _run_with_watchdog(
-                    runner(test_fn, backend, test_config),
+                    runner(test_metadata.test_fn, backend, test_config),
                     OUTPUT,
-                    test_config.timeout_s,
+                    test_metadata.no_output_timeout_s,
                 )
             )
 
@@ -336,6 +338,7 @@ def refine_matrix(
     args: argparse.Namespace,
     filters_args: argparse.Namespace,
     matrix: list[TestConfig],
+    test_metadatas: dict[str, TestMetadata],
 ) -> list[TestConfig]:
     matrix = sorted(_subset_test_matrix(matrix, filters_args))
     if len(matrix) == 0:
@@ -381,16 +384,16 @@ def refine_matrix(
         if test_config.config == "custom":
             loader_img = args.override_image
         else:
-            loader_img = loader_img_path(test_config)
+            loader_img_fn = test_metadatas[test_config.example].loader_img_fn
+            loader_img = loader_img_fn(test_config)
         assert loader_img.exists(), f"loader image file {loader_img} does not exist"
 
     return matrix
 
 
 def execute_tests(
+    test_metadatas: dict[str, TestMetadata],
     matrix: list[TestConfig],
-    test_fns: dict[str, TestFunction],
-    backend_fns: dict[str, BackendFunction],
     args: argparse.Namespace,
 ):
     assert len(matrix) > 0, "Test list is empty."
@@ -400,15 +403,13 @@ def execute_tests(
     retry_queue: list[TestConfig] = []
 
     for test_config in matrix:
-        test_fn = test_fns[test_config.example]
-        backend_fn = backend_fns[test_config.example]
+        test_metadata = test_metadatas[test_config.example]
 
         fmt = f"{test_config.example} on {test_config.board} ({test_config.config}, built with {test_config.build_system})"
         log.group_start("Running " + fmt)
         result = run_test_config(
             test_config,
-            test_fn,
-            backend_fn,
+            test_metadatas[test_config.example],
             args.logs_dir,
             args.override_image,
         )
@@ -438,15 +439,11 @@ def execute_tests(
                 break
 
             for test_config in retry_queue:
-                test_fn = test_fns[test_config.example]
-                backend_fn = backend_fns[test_config.example]
-
                 fmt = f"{test_config.example} on {test_config.board} ({test_config.config}, built with {test_config.build_system})"
                 log.group_start("Running " + fmt)
                 result = run_test_config(
                     test_config,
-                    test_fn,
-                    backend_fn,
+                    test_metadatas[test_config.example],
                     args.logs_dir,
                     args.override_image,
                 )
@@ -488,38 +485,20 @@ def execute_tests(
         quit(1)
 
 
-def run_all_examples(
+def run_tests(
+    test_metadatas: dict[str, TestMetadata],
     matrix: list[TestConfig],
-    test_fns: dict[str, TestFunction],
-    backend_fns: dict[str, BackendFunction],
 ):
-    parser = argparse.ArgumentParser(
-        description="Run all examples passed to this script"
-    )
+    parser = argparse.ArgumentParser(description="Run tests")
     args, filters_args = parse_arguments(parser, matrix)
 
-    refined_matrix = refine_matrix(parser, args, filters_args, matrix)
+    refined_matrix = refine_matrix(parser, args, filters_args, matrix, test_metadatas)
 
-    execute_tests(refined_matrix, test_fns, backend_fns, args)
+    execute_tests(test_metadatas, refined_matrix, args)
 
 
-def run_single_example(
-    test_fn: TestFunction,
+def run_test(
+    test_metadata: TestMetadata,
     matrix: list[TestConfig],
-    backend_fn: BackendFunction,
 ):
-    """
-    test should raise an exception on failure.
-    matrix is the set of supported test configs for this test.
-    """
-    parser = argparse.ArgumentParser(description="Run a single example")
-    args, filters_args = parse_arguments(parser, matrix)
-
-    refined_matrix = refine_matrix(parser, args, filters_args, matrix)
-
-    execute_tests(
-        refined_matrix,
-        {refined_matrix[0].example: test_fn},
-        {refined_matrix[0].example: backend_fn},
-        args,
-    )
+    run_tests({matrix[0].example: test_metadata}, matrix)
