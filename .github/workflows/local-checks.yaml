@@ -23,3 +23,18 @@ jobs:
         with:
           # black guarantees formatting stability within a calendar year version
           version: "~= 25.0"
+
+  setup_self:
+    name: Setup self
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup systems-ci
+        uses: ./.
+        with:
+          path: systems-ci
+          python: python
+      - name: Test import
+        run: |
+          python -c 'import ts_ci; print("hello")'
