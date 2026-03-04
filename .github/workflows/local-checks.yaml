@@ -34,7 +34,6 @@ jobs:
         uses: ./.
         with:
           path: systems-ci
-          python: python
       - name: Test import
         run: |
           python -c 'import ts_ci; print("hello")'

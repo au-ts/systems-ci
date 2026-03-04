@@ -8,10 +8,6 @@ inputs:
     default: systems-ci
     required: false
 
-  python:
-    description: optional path to python interpreter
-    required: false
-
 runs:
   using: "composite"
   steps:
@@ -21,8 +17,7 @@ runs:
         repository: au-ts/systems-ci
         path: ${{ inputs.path }}
 
-    - name: Install ts_ci
-      if: ${{ inputs.python != '' }}
-      run: |
-        ${{ inputs.python }} -m pip install ${{ inputs.path }}/ts_ci
+    # this relies on writes to GITHUB_ENV
+    - name: Setup ts_ci
+      run: ${{ inputs.path }}/setup.sh
       shell: bash
