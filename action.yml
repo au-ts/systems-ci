@@ -1,0 +1,21 @@
+name: 'Trustworthy Systems CI'
+description: |
+  Useful common configuration and scripts for the Trustworthy Systems CI.
+
+inputs:
+  path:
+    description: path to clone this repo relative to GITHUB_WORKSPACE
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout systems-ci repository
+      uses: actions/checkout@v4
+      with:
+        repository: au-ts/systems-ci
+        path: ${{ inputs.path }}
+    - name: Source setup.sh
+      run: source systems-ci/setup.sh
+      shell: bash
+
