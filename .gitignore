@@ -2,3 +2,5 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 __pycache__
+build
+*.egg-info

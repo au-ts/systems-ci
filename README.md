@@ -15,17 +15,28 @@ https://github.com/au-ts/sddf/tree/main/ci). For internal documentation, look at
 
 ## Setup
 
-We provide an `action.yml` which sets necessary environment variables using
-`setup.sh` in `GITHUB_ENV`.
+We provide an `action.yml` which if given a `python` input will install the `ts_ci`
+python package.
 
-Alternatively, running `source setup.sh` will set the necessary environment
-variables to call our scripts.
+
+```yml
+    - name: Setup systems-ci
+      uses: au-ts/systems-ci@main
+      with:
+        python: venv/bin/python
+```
+
+Alternatively, specify the `path` input and run `source setup.sh` within a
+POSIX shell. This is useful for Nix usecases.
 
 ```yml
       - name: Setup systems-ci
         uses: au-ts/systems-ci@main
         with:
           path: systems-ci
+      - name: Build examples
+        run: nix develop --ignore-environment -c bash -c 'source systems-ci/setup.sh && echo hello world'
+        shell: bash
 ```
 
 ## Style

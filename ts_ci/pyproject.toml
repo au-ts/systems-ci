@@ -1,0 +1,5 @@
+[project]
+name = "ts_ci"
+version = "0.1"
+requires-python = ">= 3.9"
+readme = "README.md"

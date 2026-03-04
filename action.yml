@@ -5,7 +5,12 @@ description: |
 inputs:
   path:
     description: path to clone this repo relative to GITHUB_WORKSPACE
-    required: true
+    default: systems-ci
+    required: false
+
+  python:
+    description: optional path to python interpreter
+    required: false
 
 runs:
   using: "composite"
@@ -15,7 +20,9 @@ runs:
       with:
         repository: au-ts/systems-ci
         path: ${{ inputs.path }}
-    - name: Source setup.sh
-      run: source systems-ci/setup.sh
-      shell: bash
 
+    - name: Install ts_ci
+      if: ${{ inputs.python != '' }}
+      run: |
+        ${{ inputs.python }} -m pip install ${{ inputs.path }}/ts_ci
+      shell: bash
