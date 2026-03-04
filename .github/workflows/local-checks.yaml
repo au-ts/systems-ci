@@ -1,0 +1,31 @@
+# Copyright 2026, UNSW
+#
+# SPDX-License-Identifier: BSD-2-Clause
+
+# Actions to run in *this* repo for push/PRs.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  whitespace:
+    name: 'Trailing Whitespace'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: seL4/ci-actions/git-diff-check@master
+
+  style_python:
+    name: Style (Python)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: psf/black@stable
+        with:
+          # black guarantees formatting stability within a calendar year version
+          version: "~= 25.0"
