@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2025, UNSW
 # SPDX-License-Identifier: BSD-2-Clause
+# mypy: ignore-errors
 
 """Polyfills for older python versions"""
 
@@ -23,7 +24,7 @@ if not hasattr(contextlib, "chdir"):
         finally:
             os.chdir(old_cwd)
 
-    contextlib.chdir = chdir
+    contextlib.chdir = chdir  # type: ignore
 
 
 # Python 3.11

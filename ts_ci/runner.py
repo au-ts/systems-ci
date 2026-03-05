@@ -16,7 +16,7 @@ from datetime import datetime
 import itertools
 from pathlib import Path
 import time
-from typing import Literal, Optional, Awaitable, Tuple
+from typing import Any, ContextManager, Coroutine, Literal, Never, Optional, Tuple
 
 from . import log
 from .backends import (
@@ -47,7 +47,7 @@ async def _watch_stdout_inactivity(
 
 
 async def _run_with_watchdog(
-    main: Awaitable[None], tee: TeeOut, timeout_no_output: float
+    main: Coroutine[Any, Any, Never], tee: TeeOut, timeout_no_output: float
 ):
     tee.touch()
 
@@ -138,7 +138,7 @@ class ArgparseActionList(argparse.Action):
     def __call__(self, parser, namespace, values: str, option_string: str):  # type: ignore
         values_set = set(values.split(","))
         if option_string and option_string.startswith("--exclude"):
-            kind = "subtractive"
+            kind: Literal["additive", "subtractive"] = "subtractive"
             values_set = self.default - values_set
         else:
             kind = "additive"
@@ -149,7 +149,7 @@ class ArgparseActionList(argparse.Action):
         if self.kind != kind:
             raise argparse.ArgumentError(
                 self,
-                "cannot use exclude and non-exclude flags together".format(
+                "cannot use exclude and non-exclude flags together for {}".format(
                     option_string
                 ),
             )
@@ -217,7 +217,7 @@ def run_test_config(
             / f"{datetime.now().strftime('%Y-%m-%d_%H.%M.%S')}.log"
         )
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        log_file_cm = log_output_to_file(log_file)
+        log_file_cm: ContextManager = log_output_to_file(log_file)
     else:
         log_file_cm = contextlib.nullcontext()
 
@@ -357,7 +357,6 @@ def refine_matrix(
                     board=test.board,
                     config="custom",
                     build_system="custom",
-                    timeout_s=test.timeout_s,
                 )
                 for test in matrix
             )

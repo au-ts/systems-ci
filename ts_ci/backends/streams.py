@@ -89,5 +89,7 @@ async def expect_output(backend: HardwareBackend, text: bytes):
 
     if text not in read:
         raise TestFailureException(
-            "failed to find expected {} in stream; did receive {}".format(text, read)
+            "failed to find expected {!r} in stream; did receive {!r}".format(
+                text, read
+            )
         )
