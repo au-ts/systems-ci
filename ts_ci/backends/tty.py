@@ -14,7 +14,7 @@ class TtyBackend(HardwareBackend):
         self.writer = None
 
         try:
-            import serial_asyncio_fast
+            import serial_asyncio_fast  # type: ignore[import-not-found]
         except ImportError:
             raise ModuleNotFoundError(
                 "no module 'serial_asyncio_fast; install 'pyserial-asyncio-fast'"

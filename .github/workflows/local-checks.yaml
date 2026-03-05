@@ -24,6 +24,22 @@ jobs:
           # black guarantees formatting stability within a calendar year version
           version: "~= 25.0"
 
+  lint_python:
+    name: Lint (Python)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup mypy
+        run: |
+          python3 -m venv venv
+          source ./venv/bin/activate
+          pip install mypy==1.17
+      - name: Run mypy
+        run: |
+          source ./venv/bin/activate
+          mypy -p ts_ci
+
   setup_self:
     name: Setup self
     runs-on: ubuntu-24.04
