@@ -15,19 +15,22 @@ https://github.com/au-ts/sddf/tree/main/ci). For internal documentation, look at
 
 ## Setup
 
-We provide an `action.yml` which if given a `python` input will install the `ts_ci`
-python package.
+Locally, you can run the below `pip` command to install `ts_ci`.
 
+```sh
+$ pip install git+https://github.com/au-ts/systems-ci#subdirectory=ts_ci
+```
+
+We provide an `action.yml` which will set up `PYTHONPATH` such that one can
+import the `ts_ci` python package.
 
 ```yml
     - name: Setup systems-ci
       uses: au-ts/systems-ci@main
-      with:
-        python: venv/bin/python
 ```
 
 Alternatively, specify the `path` input and run `source setup.sh` within a
-POSIX shell. This is useful for Nix usecases.
+POSIX shell. This is useful for Nix usecases, where the environment is pure.
 
 ```yml
       - name: Setup systems-ci
