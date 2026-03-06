@@ -14,3 +14,5 @@ set_env_var() {
 }
 
 set_env_var PYTHONPATH "$SCRIPT_DIR:$PYTHONPATH"
+
+exit 1
