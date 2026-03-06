@@ -108,8 +108,8 @@ def matrix_product(**items):
 class ArgparseActionList(argparse.Action):
     def __init__(
         self,
-        option_strings,
-        dest,
+        option_strings: list[str],
+        dest: str,
         default=None,
     ):
         _option_strings = []
