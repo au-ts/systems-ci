@@ -28,13 +28,7 @@ from .backends import (
     TeeOut,
     OUTPUT,
 )
-from .structs import (
-    TestConfig,
-    TestMetadata,
-    TestFunction,
-    BackendFunction,
-    LoaderImgFunction,
-)
+from .interface import TestCase
 
 
 async def _watch_stdout_inactivity(
@@ -79,13 +73,12 @@ async def _run_with_watchdog(
 
 
 async def runner(
-    test: TestFunction,
+    test: TestCase,
     backend: HardwareBackend,
-    test_config: TestConfig,
 ):
     try:
         await backend.start()
-        await test(backend, test_config)
+        await test.run(backend)
 
     except (EOFError, asyncio.IncompleteReadError):
         raise TestFailureException("EOF when reading from backend stream")
@@ -94,13 +87,13 @@ async def runner(
         await backend.stop()
 
 
-def matrix_product(**items):
+def matrix_product(dataclass, **items):
     assert set(items.keys()) <= set(
-        TestConfig.__dataclass_fields__.keys()
+        dataclass.__dataclass_fields__.keys()
     ), "keys subset of config fields"
 
     return [
-        TestConfig(**dict(zip(items.keys(), fields)))
+        dataclass(**dict(zip(items.keys(), fields)))
         for fields in itertools.product(*items.values())
     ]
 
@@ -157,65 +150,42 @@ class ArgparseActionList(argparse.Action):
         setattr(namespace, self.dest, values_set)
 
 
-def _list_test_cases(matrix: list[TestConfig]):
-    if len(matrix) == 0:
+def _list_test_cases(tests: list[TestCase]):
+    if len(tests) == 0:
         return "   (none)"
 
+    # TODO
     lines = []
-    for example, tests in itertools.groupby(matrix, key=lambda c: c.example):
-        lines.append(f"--- Example: {example} ---")
+    for test in tests:
+        lines.append(repr(test))
+    # lines = []
+    # for test, tests in itertools.groupby(tests, key=lambda c: c.example):
+    #     lines.append(f"--- Test: {example} ---")
 
-        for board, group in itertools.groupby(tests, key=lambda c: c.board):
-            lines.append(
-                " - {}: {}".format(
-                    board, ", ".join(f"{c.config}/{c.build_system}" for c in group)
-                )
-            )
+    #     for board, group in itertools.groupby(tests, key=lambda c: c.board):
+    #         lines.append(
+    #             " - {}: {}".format(
+    #                 board, ", ".join(f"{c.config}/{c.build_system}" for c in group)
+    #             )
+    #         )
 
     return "\n".join(lines)
-
-
-def _subset_test_matrix(
-    matrix: list[TestConfig], filters: argparse.Namespace
-) -> list[TestConfig]:
-    def filter_check(test_config):
-        implies = lambda a, b: not a or b
-        return all(
-            [
-                (test_config.example in filters.examples),
-                (test_config.board in filters.boards),
-                (test_config.config in filters.configs),
-                (test_config.build_system in filters.build_systems),
-                (implies(filters.only_qemu is True, test_config.is_qemu())),
-                (implies(filters.only_qemu is False, not test_config.is_qemu())),
-            ]
-        )
-
-    return list(filter(filter_check, matrix))
 
 
 ResultKind = Literal["pass", "fail", "not_run", "retry", "interrupted"]
 
 
-def run_test_config(
-    test_config: TestConfig,
-    test_metadata: TestMetadata,
+def _run_test_case(
+    test: TestCase,
     logs_dir: Optional[Path] = None,
     loader_img_override: Optional[Path] = None,
 ) -> ResultKind:
 
-    loader_img = loader_img_override or test_metadata.loader_img_fn(test_config)
-    backend = test_metadata.backend_fn(test_config, loader_img)
+    loader_img = loader_img_override or test.loader_img()
+    backend = test.backend(loader_img)
 
     if logs_dir:
-        log_file = (
-            logs_dir
-            / test_config.example
-            / test_config.board
-            / test_config.config
-            / test_config.build_system
-            / f"{datetime.now().strftime('%Y-%m-%d_%H.%M.%S')}.log"
-        )
+        log_file = test.log_file_path(logs_dir, datetime.now())
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file_cm: ContextManager = log_output_to_file(log_file)
     else:
@@ -225,9 +195,9 @@ def run_test_config(
         with log_file_cm:
             asyncio.run(
                 _run_with_watchdog(
-                    runner(test_metadata.test_fn, backend, test_config),
+                    runner(test, backend),
                     OUTPUT,
-                    test_metadata.no_output_timeout_s,
+                    test.no_output_timeout_s,
                 )
             )
 
@@ -248,32 +218,7 @@ def run_test_config(
     return "pass"
 
 
-def parse_arguments(
-    parser: argparse.ArgumentParser, matrix: list[TestConfig]
-) -> Tuple[argparse.Namespace, argparse.Namespace]:
-    filters = parser.add_argument_group(title="filters")
-    filters.add_argument(
-        "--examples",
-        default={test.example for test in matrix},
-        action=ArgparseActionList,
-    )
-    filters.add_argument(
-        "--boards", default={test.board for test in matrix}, action=ArgparseActionList
-    )
-    filters.add_argument(
-        "--configs", default={test.config for test in matrix}, action=ArgparseActionList
-    )
-    filters.add_argument(
-        "--build-systems",
-        default={test.build_system for test in matrix},
-        action=ArgparseActionList,
-    )
-    filters.add_argument(
-        "--only-qemu",
-        action=argparse.BooleanOptionalAction,
-        help="select only QEMU tests",
-    )
-
+def add_runner_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--single",
         action="store_true",
@@ -325,48 +270,28 @@ def parse_arguments(
         ),
     )
 
-    args = parser.parse_args()
 
-    filters_args = argparse.Namespace(
-        **{a.dest: getattr(args, a.dest) for a in filters._group_actions}
-    )
-    return (args, filters_args)
-
-
-def refine_matrix(
+def apply_runner_arguments(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
-    filters_args: argparse.Namespace,
-    matrix: list[TestConfig],
-    test_metadatas: dict[str, TestMetadata],
-) -> list[TestConfig]:
-    matrix = sorted(_subset_test_matrix(matrix, filters_args))
-    if len(matrix) == 0:
+    tests: list[TestCase],
+) -> list[TestCase]:
+    if len(tests) == 0:
         parser.error("applied filters result in zero selected tests")
+
+    if args.single and len(tests) != 1:
+        parser.error(
+            "requested --single but applied filters generated multiple cases: \n"
+            + _list_test_cases(tests)
+        )
 
     if loader_img := args.override_image:
         if not args.single:
             parser.error("requested --override-image but --single not specified")
 
-        # Remove config and build system from the path as we pass the board path.
-        # But we still want to make the user specify the board.
-        matrix = sorted(
-            set(
-                TestConfig(
-                    example=test.example,
-                    board=test.board,
-                    config="custom",
-                    build_system="custom",
-                )
-                for test in matrix
-            )
-        )
+        assert Path(loader_img).exists(), "--override-image path does not exist"
 
-    if args.single and len(matrix) != 1:
-        parser.error(
-            "requested --single but applied filters generated multiple cases: \n"
-            + _list_test_cases(matrix)
-        )
+        assert len(tests) == 1, "checked earlier"
 
     if args.override_backend:
         if not args.single:
@@ -376,59 +301,52 @@ def refine_matrix(
 
     if args.dry_run:
         print("Would run the following test cases:")
-        print(_list_test_cases(matrix))
+        print(_list_test_cases(tests))
         quit(0)
 
-    for test_config in matrix:
-        if test_config.config == "custom":
-            loader_img = args.override_image
-        else:
-            loader_img_fn = test_metadatas[test_config.example].loader_img_fn
-            loader_img = loader_img_fn(test_config)
-        assert loader_img.exists(), f"loader image file {loader_img} does not exist"
+    if not args.override_image:
+        for test in tests:
+            loader_img = test.loader_img()
+            assert loader_img.exists(), f"loader image file {loader_img} does not exist"
 
-    return matrix
+    return tests
 
 
 def execute_tests(
-    test_metadatas: dict[str, TestMetadata],
-    matrix: list[TestConfig],
+    tests: list[TestCase],
     args: argparse.Namespace,
 ):
-    assert len(matrix) > 0, "Test list is empty."
+    assert len(tests) > 0, "Test list is empty."
 
-    test_results: dict[TestConfig, ResultKind] = {}
+    test_results: dict[TestCase, ResultKind] = {}
     do_retries = False
-    retry_queue: list[TestConfig] = []
+    retry_queue: list[TestCase] = []
 
-    for test_config in matrix:
-        test_metadata = test_metadatas[test_config.example]
-
-        fmt = f"{test_config.example} on {test_config.board} ({test_config.config}, built with {test_config.build_system})"
+    for test_case in tests:
+        fmt = test_case.pretty_name()
         log.group_start("Running " + fmt)
-        result = run_test_config(
-            test_config,
-            test_metadatas[test_config.example],
+        result = _run_test_case(
+            test_case,
             args.logs_dir,
             args.override_image,
         )
         log.group_end("Finished running " + fmt)
 
-        test_results[test_config] = result
+        test_results[test_case] = result
 
         if result == "interrupted" or (result != "pass" and args.fast_fail):
             do_retries = False
             break
         elif result == "retry":
             do_retries = True
-            retry_queue.append(test_config)
+            retry_queue.append(test_case)
 
     if do_retries:
         for retry in range(args.retry_count):
             if len(retry_queue) == 0:
                 break
 
-            next_retry_queue: list[TestConfig] = []
+            next_retry_queue: list[TestCase] = []
             log.info(
                 f"Retrying (retry {retry + 1}/{args.retry_count}); waiting for {args.retry_delay}s"
             )
@@ -438,11 +356,10 @@ def execute_tests(
                 break
 
             for test_config in retry_queue:
-                fmt = f"{test_config.example} on {test_config.board} ({test_config.config}, built with {test_config.build_system})"
+                fmt = test_case.pretty_name()
                 log.group_start("Running " + fmt)
-                result = run_test_config(
-                    test_config,
-                    test_metadatas[test_config.example],
+                result = _run_test_case(
+                    test_case,
                     args.logs_dir,
                     args.override_image,
                 )
@@ -456,16 +373,16 @@ def execute_tests(
             retry_queue = next_retry_queue
 
     passing, failing, retry_failures, not_run = [], [], [], []
-    for test_config in matrix:
-        result = test_results.get(test_config, "not_run")
+    for test_case in tests:
+        result = test_results.get(test_case, "not_run")
         if result == "pass":
-            passing.append(test_config)
+            passing.append(test_case)
         elif result == "fail" or result == "interrupted":
-            failing.append(test_config)
+            failing.append(test_case)
         elif result == "retry":
-            retry_failures.append(test_config)
+            retry_failures.append(test_case)
         elif result == "not_run":
-            not_run.append(test_config)
+            not_run.append(test_case)
         else:
             assert False, "impossible"
 
@@ -480,24 +397,5 @@ def execute_tests(
         print("===== Transient failures remaining after multiple retries ====")
         print(_list_test_cases(retry_failures))
 
-    if len(passing) != len(matrix):
+    if len(passing) != len(tests):
         quit(1)
-
-
-def run_tests(
-    test_metadatas: dict[str, TestMetadata],
-    matrix: list[TestConfig],
-):
-    parser = argparse.ArgumentParser(description="Run tests")
-    args, filters_args = parse_arguments(parser, matrix)
-
-    refined_matrix = refine_matrix(parser, args, filters_args, matrix, test_metadatas)
-
-    execute_tests(test_metadatas, refined_matrix, args)
-
-
-def run_test(
-    test_metadata: TestMetadata,
-    matrix: list[TestConfig],
-):
-    run_tests({matrix[0].example: test_metadata}, matrix)
