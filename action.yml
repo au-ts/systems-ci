@@ -11,11 +11,49 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout systems-ci repository
+    - name: Checkout the systems-ci repository
       uses: actions/checkout@v4
       with:
         repository: au-ts/systems-ci
         path: ${{ inputs.path }}
+
+
+    - name: Update systems-ci with 'test with' description
+      if: ${{ github.event_name == 'pull_request' }}
+      run: |
+        PRS="$(scripts/get-prs)"
+        echo Checking out $PRS
+
+        for PR in ${PRS}; do
+          REPO=${PR%#*}
+          ID=${PR#*#}
+
+          REPO_PATH="github.com/${REPO}.git"
+
+          if [ -n "${INPUT_TOKEN}" ]
+          then
+            URL="https://${INPUT_TOKEN}@${REPO_PATH}"
+            REPO_PATH="token@${REPO_PATH}"
+          else
+            URL="https://${REPO_PATH}"
+          fi
+
+          REF="refs/pull/${ID}/head"
+
+          if [ "$REPO" == "au-ts/systems-ci" ]; then
+            REPO_PATH=${{ inputs.path }}
+            echo "Fetching ${REF} from ${REPO_PATH}"
+          else
+            echo "Skipping ${REF}"
+            continue
+          fi
+
+          cd "$REPO_PATH"
+          git fetch -q --depth 1 ${URL} ${REF}:${REF}
+          git checkout -q ${REF}
+          cd - > /dev/null
+        done
+      shell: bash
 
     # this relies on writes to GITHUB_ENV
     - name: Setup ts_ci
