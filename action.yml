@@ -21,7 +21,7 @@ runs:
     - name: Update systems-ci with 'test with' description
       if: ${{ github.event_name == 'pull_request' }}
       run: |
-        PRS="$(scripts/get-prs)"
+        PRS="$(${{ inputs.path }}/scripts/get-prs)"
         echo Checking out $PRS
 
         for PR in ${PRS}; do
