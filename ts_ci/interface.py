@@ -2,6 +2,7 @@
 # Copyright 2026, UNSW
 # SPDX-License-Identifier: BSD-2-Clause
 
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Awaitable
 from pathlib import Path
@@ -15,6 +16,7 @@ class TestConfig:
     board: str
     config: str
     build_system: str
+    metadata: TestMetadata
 
     def is_qemu(self):
         # TODO: x86_64_generic assumes QEMU for the moment.
