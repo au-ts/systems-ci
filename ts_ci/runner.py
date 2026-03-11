@@ -31,6 +31,9 @@ from .backends import (
 from .interface import TestCase
 
 
+TestCaseSummaryFunction = Callable[[list[TestCase]], str]
+
+
 async def _watch_stdout_inactivity(
     tee: TeeOut, timeout_no_output: float, poll_s: float = 0.5
 ):
@@ -150,28 +153,6 @@ class ArgparseActionList(argparse.Action):
         setattr(namespace, self.dest, values_set)
 
 
-def _list_test_cases(tests: list[TestCase]):
-    if len(tests) == 0:
-        return "   (none)"
-
-    # TODO
-    lines = []
-    for test in tests:
-        lines.append(repr(test))
-    # lines = []
-    # for test, tests in itertools.groupby(tests, key=lambda c: c.example):
-    #     lines.append(f"--- Test: {example} ---")
-
-    #     for board, group in itertools.groupby(tests, key=lambda c: c.board):
-    #         lines.append(
-    #             " - {}: {}".format(
-    #                 board, ", ".join(f"{c.config}/{c.build_system}" for c in group)
-    #             )
-    #         )
-
-    return "\n".join(lines)
-
-
 ResultKind = Literal["pass", "fail", "not_run", "retry", "interrupted"]
 
 
@@ -275,6 +256,7 @@ def apply_runner_arguments(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     tests: list[TestCase],
+    test_case_summary_fn: TestCaseSummaryFunction,
 ) -> list[TestCase]:
     if len(tests) == 0:
         parser.error("applied filters result in zero selected tests")
@@ -282,7 +264,7 @@ def apply_runner_arguments(
     if args.single and len(tests) != 1:
         parser.error(
             "requested --single but applied filters generated multiple cases: \n"
-            + _list_test_cases(tests)
+            + test_case_summary_fn(tests)
         )
 
     if loader_img := args.override_image:
@@ -301,7 +283,7 @@ def apply_runner_arguments(
 
     if args.dry_run:
         print("Would run the following test cases:")
-        print(_list_test_cases(tests))
+        print(test_case_summary_fn(tests))
         quit(0)
 
     if not args.override_image:
@@ -315,6 +297,7 @@ def apply_runner_arguments(
 def execute_tests(
     tests: list[TestCase],
     args: argparse.Namespace,
+    test_case_summary_fn: TestCaseSummaryFunction,
 ):
     assert len(tests) > 0, "Test list is empty."
 
@@ -387,15 +370,15 @@ def execute_tests(
             assert False, "impossible"
 
     print("==== Passing ====")
-    print(_list_test_cases(passing))
+    print(test_case_summary_fn(passing))
     print("==== Failed =====")
-    print(_list_test_cases(failing))
+    print(test_case_summary_fn(failing))
     if len(not_run) != 0:
         print("===== Cancelled (not run) =====")
-        print(_list_test_cases(not_run))
+        print(test_case_summary_fn(not_run))
     if len(retry_failures) != 0:
         print("===== Transient failures remaining after multiple retries ====")
-        print(_list_test_cases(retry_failures))
+        print(test_case_summary_fn(retry_failures))
 
     if len(passing) != len(tests):
         quit(1)

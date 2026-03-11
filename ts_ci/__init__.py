@@ -25,5 +25,6 @@ from .runner import (
     execute_tests,
     matrix_product,
     ArgparseActionList,
+    TestCaseSummaryFunction,
 )
 from .interface import TestCase
