@@ -13,3 +13,6 @@ version = {file = ["VERSION"]}
 
 [tool.setuptools.package-dir]
 ts_ci = "."
+
+[tool.setuptools.package-data]
+ts_ci = ["py.typed"]
