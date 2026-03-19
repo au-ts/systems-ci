@@ -29,16 +29,22 @@ def _print_text_on_timeout(f):
     return wrapper
 
 
-async def send_input(backend: HardwareBackend, text: bytes):
-    backend.input_stream.write(text)
+async def send_input(istream: asyncio.StreamWriter | HardwareBackend, text: bytes):
+    if isinstance(istream, HardwareBackend):
+        istream = istream.input_stream
+
+    istream.write(text)
     OUTPUT.write(text)
-    await backend.input_stream.drain()
+    await istream.drain()
 
 
 @_print_text_on_timeout
-async def wait_for_output(backend: HardwareBackend, text: bytes) -> bytes:
+async def wait_for_output(ostream: asyncio.StreamReader | HardwareBackend, text: bytes) -> bytes:
     if len(text) == 0:
         raise ValueError("Text should be at least 1 byte")
+
+    if isinstance(ostream, HardwareBackend):
+        ostream = ostream.output_stream
 
     buffer = bytearray()
 
@@ -58,7 +64,7 @@ async def wait_for_output(backend: HardwareBackend, text: bytes) -> bytes:
         # the risk of consuming more input than we desired, and thus missing
         # part of the output next time.
         # TODO: backwards seek?
-        read = await backend.output_stream.read(1)
+        read = await ostream.read(1)
         if read == b"":
             raise EOFError()
 
@@ -80,11 +86,13 @@ async def wait_for_output(backend: HardwareBackend, text: bytes) -> bytes:
 
 
 @_print_text_on_timeout
-async def expect_output(backend: HardwareBackend, text: bytes):
+async def expect_output(ostream: asyncio.StreamReader | HardwareBackend, text: bytes):
     if len(text) == 0:
         raise ValueError("Text should be at least 1 byte")
+    if isinstance(ostream, HardwareBackend):
+        ostream = ostream.output_stream
 
-    read = await backend.output_stream.readexactly(len(text))
+    read = await ostream.readexactly(len(text))
     OUTPUT.write(read)
 
     if text not in read:
