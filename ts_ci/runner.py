@@ -29,65 +29,9 @@ from .backends import (
     OUTPUT,
 )
 from .interface import TestCase
-
+from .stream_watchdog import StreamWatchdog
 
 TestCaseSummaryFunction = Callable[[list[TestCase]], str]
-
-
-async def _watch_stdout_inactivity(
-    tee: TeeOut, timeout_no_output: float, poll_s: float = 0.5
-):
-    while True:
-        await asyncio.sleep(poll_s)
-        if tee.last_write_age_s() >= timeout_no_output:
-            raise asyncio.TimeoutError(f"No output for more than {timeout_no_output}s")
-
-
-async def _run_with_watchdog(
-    main: Coroutine[Any, Any, Never], tee: TeeOut, timeout_no_output: float
-):
-    tee.touch()
-
-    main_task = asyncio.create_task(main, name="main")
-    watchdog_task = asyncio.create_task(
-        _watch_stdout_inactivity(tee, timeout_no_output),
-        name="watchdog",
-    )
-
-    try:
-        done, _ = await asyncio.wait(
-            {main_task, watchdog_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        # If watchdog fired first - cancel main and raise timeout
-        if watchdog_task in done:
-            exc = watchdog_task.exception()
-            if exc is not None:
-                main_task.cancel()
-                await asyncio.gather(main_task, return_exceptions=True)
-                raise exc
-
-        # Otherwise main finished first - propagate
-        await main_task
-    finally:
-        if not watchdog_task.done():
-            watchdog_task.cancel()
-        await asyncio.gather(watchdog_task, return_exceptions=True)
-
-
-async def runner(
-    test: TestCase,
-    backend: HardwareBackend,
-):
-    try:
-        await backend.start()
-        await test.run(backend)
-
-    except (EOFError, asyncio.IncompleteReadError):
-        raise TestFailureException("EOF when reading from backend stream")
-    finally:
-        reset_terminal()
-        await backend.stop()
 
 
 def matrix_product(dataclass, **items):
@@ -174,13 +118,35 @@ def _run_test_case(
 
     try:
         with log_file_cm:
-            asyncio.run(
-                _run_with_watchdog(
-                    runner(test, backend),
-                    OUTPUT,
-                    test.no_output_timeout_s,
-                )
-            )
+            # The structure here (double stop) is to work around limitations of
+            # Python's asyncios framework (specifically gh-103847 affected by
+            # the patches bpo-39622/gh-32105 in cpython) where the first
+            # ctrl+c will call `task.cancel()`, whereas the second will not
+            # cancel it and then just KeyboardInterrupt.
+            # We want our backend stop to always work, so we explicitly run it in a new
+            # asyncio event loop at the end. The cancel can sometimes break
+            # with asyncio.create_subprocess_exec but also infinite while loops.
+
+            async def _inner():
+                async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
+                    try:
+                        await backend.start()
+                        await test.run(backend)
+                    except (EOFError, asyncio.IncompleteReadError):
+                        raise TestFailureException("EOF when reading from backend stream")
+                    except asyncio.CancelledError:
+                        log.info("cancelling tests...")
+                        raise
+                    finally:
+                        reset_terminal()
+                        await asyncio.shield(backend.stop())
+
+            asyncio.run(_inner())
+            try:
+                reset_terminal()
+                asyncio.run(backend.stop())
+            except:
+                log.info("failed to stop backend")
 
     except TestFailureException as e:
         log.error(f"Test failed: {e}")
