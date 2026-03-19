@@ -15,7 +15,7 @@ class QemuBackend(HardwareBackend):
         self.invocation_args = list(invocation_args)
 
     async def start(self):
-        assert self.process is None, "start() not previously called"
+        assert self.process is None, "start() was previously called"
         self.process = await asyncio.create_subprocess_exec(
             self.invocation_exe,
             *self.invocation_args,
@@ -25,7 +25,9 @@ class QemuBackend(HardwareBackend):
         )
 
     async def stop(self):
-        assert self.process is not None, "process not running"
+        if self.process is None:
+            return
+
         try:
             self.process.terminate()
             await self.process.wait()
