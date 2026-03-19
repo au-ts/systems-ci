@@ -9,6 +9,7 @@ from .backends import TeeOut
 # Modified from https://github.com/python/cpython/blob/v3.14.3/Lib/asyncio/timeouts.py
 # under the Zero-Clause BSD License
 
+
 class _State(enum.Enum):
     CREATED = "created"
     ENTERED = "active"
@@ -16,9 +17,12 @@ class _State(enum.Enum):
     EXPIRED = "expired"
     EXITED = "finished"
 
+
 @final
 class StreamWatchdog:
-    def __init__(self, watchdog_timeout: float, tee: TeeOut, poll_s: float = 0.5) -> None:
+    def __init__(
+        self, watchdog_timeout: float, tee: TeeOut, poll_s: float = 0.5
+    ) -> None:
         self._state = _State.CREATED
 
         self._timeout_handler: Optional[asyncio.Handle] = None
@@ -37,7 +41,9 @@ class StreamWatchdog:
         if self._tee.last_write_age_s() >= self._timeout:
             self._timeout_handler = loop.call_soon(self._on_timeout)
         else:
-            self._timeout_handler = loop.call_at(loop.time() + self._poll_s, self._watchdog_kick)
+            self._timeout_handler = loop.call_at(
+                loop.time() + self._poll_s, self._watchdog_kick
+            )
 
     async def __aenter__(self) -> "StreamWatchdog":
         if self._state is not _State.CREATED:

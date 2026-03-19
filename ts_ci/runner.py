@@ -16,6 +16,7 @@ from datetime import datetime
 import itertools
 from pathlib import Path
 import time
+import traceback
 from typing import Any, ContextManager, Coroutine, Literal, Never, Optional, Tuple
 
 from . import log
@@ -133,7 +134,9 @@ def _run_test_case(
                         await backend.start()
                         await test.run(backend)
                     except (EOFError, asyncio.IncompleteReadError):
-                        raise TestFailureException("EOF when reading from backend stream")
+                        raise TestFailureException(
+                            "EOF when reading from backend stream"
+                        )
                     except asyncio.CancelledError:
                         log.info("cancelling tests...")
                         raise
@@ -146,7 +149,7 @@ def _run_test_case(
                 reset_terminal()
                 asyncio.run(backend.stop())
             except:
-                log.info("failed to stop backend")
+                log.info("failed to stop backend, continuing")
 
     except TestFailureException as e:
         log.error(f"Test failed: {e}")
@@ -160,6 +163,8 @@ def _run_test_case(
     except KeyboardInterrupt:
         log.info("Tests cancelled (SIGINT)")
         return "interrupted"
+    except Exception as e:
+        log.error(f"Test failed (internal exception):\n{traceback.format_exc()}")
 
     log.info(f"Test passed")
     return "pass"
