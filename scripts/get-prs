@@ -138,11 +138,10 @@ def main():
       event = json.load(f)
     issue_id = int(event['number'])
 
-    # optional auth token. this comes from the 'with: token' / 'input: token' parameter
-    # in the github action.
-    token = os.environ.get("INPUT_TOKEN")
+    # optional auth token. our action.yml sets this up
+    token = os.environ.get("GITHUB_TOKEN")
 
-    # if INPUT_TOKEN is set, but the empty string, use None instead
+    # if GITHUB_TOKEN is set, but the empty string, use None instead
     if not token:
         token = None
 
@@ -158,7 +157,7 @@ def main():
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     else:
-        print("warning: no github bearer token is set, might be ratelimited")
+        print("warning: no github bearer token is set, might be ratelimited", file=sys.stderr)
 
     response = urllib.request.urlopen(request)
     if response.getcode() != 200:
