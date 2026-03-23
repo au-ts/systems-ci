@@ -8,6 +8,11 @@ inputs:
     default: systems-ci
     required: false
 
+  token:
+    description: github access token used to fetch the API to prevent rate limiting errors
+    default: ${{ github.token }}
+    required: false
+
 runs:
   using: "composite"
   steps:
