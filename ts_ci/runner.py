@@ -200,7 +200,6 @@ def add_runner_arguments(parser: argparse.ArgumentParser) -> None:
         "--logs-dir",
         type=Path,
         default=Path("ci_logs"),
-        action=argparse.BooleanOptionalAction,
         help="save output to a log directory",
     )
     parser.add_argument(
