@@ -1,7 +1,7 @@
 import asyncio
 import enum
 
-from types import TracebackType
+from types import TracebackType, MethodType
 from typing import final, Optional, Type
 
 from .backends import TeeOut
@@ -16,6 +16,43 @@ class _State(enum.Enum):
     EXPIRING = "expiring"
     EXPIRED = "expired"
     EXITED = "finished"
+
+
+# for python <3.11 support
+def _monkeypatch_task(task: asyncio.Task):
+    if hasattr(asyncio.Task, "cancelling"):
+        # already supported
+        return task
+
+    task._num_cancels_requested = 0  # type: ignore[attr-defined]
+
+    original_cancel = task.__class__.cancel
+
+    # Matching https://github.com/python/cpython/blob/3.13/Lib/asyncio/tasks.py#L221-L223
+    def cancel(self, *args, **kwargs):
+        if not self.done():
+            self._num_cancels_requested += 1
+
+        original_cancel(self, *args, **kwargs)
+
+    def cancelling(self):
+        return self._num_cancels_requested
+
+    def uncancel(self):
+        # The _must_cancel still exists in 3.9
+        # https://github.com/python/cpython/blob/3.9/Lib/asyncio/tasks.py#L234-L237
+        # Now: https://github.com/python/cpython/blob/3.13/Lib/asyncio/tasks.py#L256C1-L260C43
+        if self._num_cancels_requested > 0:
+            self._num_cancels_requested -= 1
+            if self._num_cancels_requested == 0:
+                self._must_cancel = False
+        return self._num_cancels_requested
+
+    task.cancel = MethodType(cancel, task)  # type: ignore[method-assign]
+    task.uncancel = MethodType(uncancel, task)  # type: ignore[assignment]
+    task.cancelling = MethodType(cancelling, task)  # type: ignore[method-assign]
+
+    return task
 
 
 @final
@@ -52,7 +89,7 @@ class StreamWatchdog:
         if task is None:
             raise RuntimeError("StreamWatchdog should be used inside a task")
         self._state = _State.ENTERED
-        self._task = task
+        self._task = _monkeypatch_task(task)
         self._tee.touch()
         self._cancelling = self._task.cancelling()
         self._watchdog_kick()
