@@ -17,7 +17,7 @@ import itertools
 from pathlib import Path
 import time
 import traceback
-from typing import Any, ContextManager, Coroutine, Literal, Never, Optional, Tuple
+from typing import Any, ContextManager, Coroutine, Literal, Optional, Tuple
 
 from . import log
 from .backends import (

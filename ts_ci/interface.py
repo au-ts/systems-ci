@@ -7,7 +7,6 @@ from abc import abstractmethod, ABC
 from collections import abc
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Self
 from pathlib import Path
 
 from .backends import HardwareBackend
@@ -36,4 +35,4 @@ class TestCase(abc.Hashable, ABC):
     def log_file_path(self, logs_dir: Path, now: datetime) -> Path: ...
 
     @abstractmethod
-    def __lt__(self, other: Self) -> bool: ...
+    def __lt__(self, other: TestCase) -> bool: ...
