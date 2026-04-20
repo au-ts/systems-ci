@@ -28,6 +28,7 @@ from .common import (
     TeeOut,
 )
 from .streams import send_input, wait_for_output, expect_output
+from .ipbench_queue import IpBenchQueueBackend
 from .machine_queue import MachineQueueBackend
 from .qemu import QemuBackend
 from .tty import TtyBackend
