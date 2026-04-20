@@ -133,9 +133,13 @@ def _run_test_case(
                     try:
                         await backend.start()
                         await test.run(backend)
-                    except (EOFError, asyncio.IncompleteReadError):
+                    except EOFError:
                         raise TestFailureException(
                             "EOF when reading from backend stream"
+                        )
+                    except asyncio.IncompleteReadError as e:
+                        raise TestFailureException(
+                            "EOF when reading from backend stream: {}".format(e)
                         )
                     except asyncio.CancelledError:
                         log.info("cancelling tests...")
