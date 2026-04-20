@@ -14,6 +14,7 @@ from .backends import (
     send_input,
     wait_for_output,
     expect_output,
+    IpBenchQueueBackend,
     MachineQueueBackend,
     QemuBackend,
     TtyBackend,
