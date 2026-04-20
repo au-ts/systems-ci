@@ -152,8 +152,8 @@ def _run_test_case(
             try:
                 reset_terminal()
                 asyncio.run(backend.stop())
-            except:
-                log.info("failed to stop backend, continuing")
+            except Exception as e:
+                log.info("failed to stop backend ('{}'), continuing".format(e))
 
     except TestFailureException as e:
         log.error(f"Test failed: {e}")
