@@ -11,7 +11,7 @@ repositories.
 
 For documentation on how to use the CI runner, have a look at [the sDDF documentation](
 https://github.com/au-ts/sddf/tree/main/ci). For internal documentation, look at
-[the ts_ci folder][ts_ci/README.md].
+[the ts_ci folder](ts_ci/README.md).
 
 ## Setup
 
