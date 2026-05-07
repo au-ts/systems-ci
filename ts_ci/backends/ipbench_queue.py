@@ -39,6 +39,9 @@ class IpBenchQueueBackend(HardwareBackend):
         self.benchmark_script = benchmark_script
         self.mq_backend = mq_backend
         self.process: Optional[Process] = None
+        # Store whether or not we have the lock, as unlike machine queue there
+        # is no nice way to query whether we have the lock in one go.
+        self.has_lock = False
 
         if IS_CI:
             self.job_key = "-".join(
@@ -72,9 +75,14 @@ class IpBenchQueueBackend(HardwareBackend):
         if return_code != 0:
             raise LockedBoardException([self.lock_group])
 
+        self.has_lock = True
         log.info(f"Acquired lock for {self.lock_group}")
 
     async def _release_lock(self):
+        if not self.has_lock:
+            log.info(f"Did not have lock for {self.lock_group}, not releasing")
+            return
+
         release_lock = await asyncio.create_subprocess_exec(
             # fmt: off
             "iq.sh", "sem",
@@ -88,6 +96,7 @@ class IpBenchQueueBackend(HardwareBackend):
         return_code = await release_lock.wait()
         assert return_code == 0, "couldn't unlock group for unknown reason"
 
+        self.has_lock = False
         log.info(f"Released locks for {self.lock_group}")
 
     async def start(self):
@@ -101,6 +110,7 @@ class IpBenchQueueBackend(HardwareBackend):
 
     async def begin_benchmark(self, *bench_script_args: str):
         assert self.process is None, "begin_benchmark() should only be called once"
+        assert self.has_lock, "begin_benchmark() must be called after having lock"
 
         self.process = await asyncio.create_subprocess_exec(
             # fmt: off
@@ -118,21 +128,20 @@ class IpBenchQueueBackend(HardwareBackend):
         )
 
     async def stop(self):
-        # Try to stop our child
+        # Try to stop our child (release its lock)
         await self.mq_backend.stop()
-
-        if self.process is None:
-            return
-
+        # Release our lock
         await self._release_lock()
 
-        try:
-            # Use SIGHUP to close the console
-            self.process.send_signal(SIGHUP)
-            # Use transport.close() because await process.wait() deadlocks
-            self.process._transport.close()  # type: ignore
-        except ProcessLookupError:
-            pass
+        # must not have started the benchmark
+        if self.process is not None:
+            try:
+                # Use SIGHUP to close the console
+                self.process.send_signal(SIGHUP)
+                # Use transport.close() because await process.wait() deadlocks
+                self.process._transport.close()  # type: ignore
+            except ProcessLookupError:
+                pass
 
     @property
     def input_stream(self) -> asyncio.StreamWriter:
