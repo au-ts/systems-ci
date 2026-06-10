@@ -16,7 +16,13 @@ MACHINE_QUEUE_BOARDS: dict[str, list[str]] = {
     "odroidc4": ["odroidc4_1", "odroidc4_2"],
     "star64": ["star64"],
     "zcu102": ["zcu102", "zcu102_2"],
+    # The RPi4B on our machine queue is the 4GB model.
+    # We can run images targeting the 1GB and 2GB models
+    # because the physical memory region overlaps.
+    # See files in seL4 source /src/plat/bcm2711 for more details.
     "rpi4b_1gb": ["pi4B"],
+    "rpi4b_2gb": ["pi4B"],
+    "rpi4b_4gb": ["pi4B"],
 }
 
 MACHINE_QUEUE_BOARD_OPTIONS: dict[str, dict[str, Any]] = {
