@@ -23,10 +23,12 @@ MACHINE_QUEUE_BOARDS: dict[str, list[str]] = {
     "rpi4b_1gb": ["pi4B"],
     "rpi4b_2gb": ["pi4B"],
     "rpi4b_4gb": ["pi4B"],
+    "vb_105": ["vb_105"],
 }
 
 MACHINE_QUEUE_BOARD_OPTIONS: dict[str, dict[str, Any]] = {
     "serengeti": dict(image_started=b"Starting kernel ..."),
     "star64": dict(image_started=b"Starting kernel ..."),
     "hifive_p550": dict(image_started=b"Starting kernel ..."),
+    "vb_105": dict(image_started=b"Booting..."),
 }
