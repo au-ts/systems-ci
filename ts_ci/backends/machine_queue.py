@@ -28,14 +28,14 @@ class MachineQueueBackend(HardwareBackend):
         image_file: Path,
         boards: list[str],
         *,
-        uboot_image_started: bytes = b"## Starting application",
+        image_started: bytes = b"## Starting application",
     ):
         """
         boards is the list of valid boards used with mq.sh
         """
         self.image_file = image_file
         self.boards = boards
-        self.uboot_image_started = uboot_image_started
+        self.image_started = image_started
         self.chosen_board = None
         self.process = None
 
@@ -159,7 +159,7 @@ class MachineQueueBackend(HardwareBackend):
         # NOTE: This includes the time for the machine queue to retry booting
         #       a few times due to spurious failures that occur.
         async with asyncio.timeout(BOOT_TIMEOUT):
-            await wait_for_output(self, self.uboot_image_started)
+            await wait_for_output(self, self.image_started)
 
     async def stop(self):
         if self.process is None:
