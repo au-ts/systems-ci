@@ -34,3 +34,14 @@ MACHINE_QUEUE_BOARD_OPTIONS: dict[str, dict[str, Any]] = {
     "vb_105": dict(image_started=b"Booting..."),
     "skylake": dict(image_started=b"Loading sel4rootserver... ok"),
 }
+
+
+def board_is_x86(board: str) -> bool:
+    if "x86" in board:
+        return True
+    elif "skylake" in board:
+        return True
+    elif board == "vb_105":
+        return True
+    else:
+        return False
