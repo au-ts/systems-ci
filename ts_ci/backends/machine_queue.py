@@ -9,6 +9,8 @@ from asyncio.subprocess import PIPE, STDOUT
 from pathlib import Path
 import sys
 
+from ts_ci.boards import board_is_x86
+
 from .. import log
 from .base import HardwareBackend
 from .common import LockedBoardException, TestFailureException
@@ -142,15 +144,29 @@ class MachineQueueBackend(HardwareBackend):
         self.chosen_board = await self._find_available_board()
         await self._acquire_lock()
 
-        self.process = await asyncio.create_subprocess_exec(
-            # fmt: off
-            "mq.sh", "run",
+        cmd_args = [
+            "mq.sh",
+            "run",
             "-n",  # don't touch the lock, we already have it.
-            "-c", "",  # no completion text, so we get stdin as soon as possible
+            "-c",
+            "",  # no completion text, so we get stdin as soon as possible
             "-a",  # keep the board running after "completion" text
-            "-f", self.image_file.resolve(),
-            "-s", self.chosen_board,
-            # fmt: on
+        ]
+
+        if board_is_x86(self.chosen_board):
+            cmd_args.extend(["-f", self.image_file.parent.resolve() / "sel4.elf"])
+
+        cmd_args.extend(
+            [
+                "-f",
+                self.image_file.resolve(),
+                "-s",
+                self.chosen_board,
+            ]
+        )
+
+        self.process = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdin=PIPE,
             stdout=PIPE,
             stderr=STDOUT,
