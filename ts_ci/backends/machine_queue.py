@@ -3,16 +3,18 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
-from signal import SIGHUP
+from datetime import datetime
+from signal import SIGINT
 import asyncio
 from asyncio.subprocess import PIPE, STDOUT
 from pathlib import Path
 import sys
+import shlex
 
 from .. import log
 from .base import HardwareBackend
-from .common import LockedBoardException, TestFailureException
-from .streams import wait_for_output
+from .common import LockedBoardException, OUTPUT, TestFailureException
+from .streams import expect_output, wait_for_output
 
 BOOT_TIMEOUT = 2 * 60  # 2 minutes
 # In case we somehow break and don't release the lock automatically.
@@ -20,6 +22,9 @@ BOOT_TIMEOUT = 2 * 60  # 2 minutes
 LOCK_TIMEOUT = 60 * 60  # 60 minutes
 # For Github Actions etc.
 IS_CI = bool(os.environ.get("CI"))
+
+
+LAUNCH_UNIQUE_ID = str(datetime.now())
 
 
 class MachineQueueBackend(HardwareBackend):
@@ -47,114 +52,56 @@ class MachineQueueBackend(HardwareBackend):
                     os.environ.get("GITHUB_WORKFLOW", "??"),
                     os.environ.get("GITHUB_RUN_ID", "??"),
                     os.environ.get("GITHUB_JOB", "??"),
-                    os.environ.get("INPUT_INDEX", "$0")[1:],
+                    os.environ.get("INPUT_INDEX", "0"),
                 ]
             )
         else:
-            self.job_key = "au_ts_ci (running locally)"
+            self.job_key = (
+                f"au_ts_ci (local file: {image_file}, id: {LAUNCH_UNIQUE_ID})"
+            )
 
-    @staticmethod
-    async def _lock_info(board: str):
-        # Print out the lock info.
-        lock_info = await asyncio.create_subprocess_exec(
-            # fmt: off
-            "mq.sh", "sem", "-mr-info", board,
-            # fmt: on
-            stdout=PIPE,
-            stderr=None,  # inherit -> print
-        )
-
-        stdout, _ = await lock_info.communicate()
-        assert (
-            b"LOCKED" in stdout or b"FREE" in stdout
-        ), f"one of locked or free ({stdout!r})"
-
-        return stdout.decode().strip("\n")
-
-    async def _find_available_board(self) -> str:
+    async def start(self):
         if len(self.boards) == 0:
             raise TestFailureException("no boards available")
 
-        lock_infos = []
+        assert self.chosen_board is None, "start() should only be called once"
+
         for board in self.boards:
-            lock_info = await self._lock_info(board)
-            if "FREE" in lock_info:
-                return board
+            self.chosen_board = board
+            exe_args = [
+                # fmt: off
+                "mq.sh", "run",
+                # no completion text, so we get stdin as soon as possible
+                "-c", "",
+                # keep the board running after "completion" text
+                "-a",
+                # only try to acquire once, don't wait for the lock
+                "-t", "0",
+                # give a unique lock name
+                "-k", self.job_key,
+                "-f", self.image_file.as_posix(),
+                "-s", self.chosen_board,
+                # fmt: on
+            ]
+            log.info(shlex.join(exe_args))
+            self.process = await asyncio.create_subprocess_exec(
+                *exe_args,
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=STDOUT,
+            )
 
-            lock_infos.append(lock_info)
+            try:
+                await expect_output(self, f"Acquiring lock for {board}\n".encode())
+                await expect_output(self, f"Lock for {board} currently free\n".encode())
+                await expect_output(self, b"Lock acquired, we are allowed to run\n")
+                break
+            except TestFailureException as e:
+                stdout, _ = await self.process.communicate()
+                OUTPUT.write(stdout)
 
-        raise LockedBoardException(lock_infos)
-
-    async def _acquire_lock(self):
-        assert self.chosen_board is not None
-
-        get_lock = await asyncio.create_subprocess_exec(
-            # fmt: off
-            "mq.sh", "sem",
-            "-wait", self.chosen_board,
-            "-k", self.job_key,
-            "-T", str(LOCK_TIMEOUT),
-            # only try to acquire once.
-            "-t", "0",
-            # fmt: on
-            stdout=None,  # inherit -> print
-            stderr=None,  # inherit -> print
-        )
-
-        return_code = await get_lock.wait()
-        if return_code == 2:
-            # Race condition, someone acquired the lock between our search and now.
-            # This should be rare, so let's just handle this with lock retries later.
-            lock_info = await self._lock_info(self.chosen_board)
-            raise LockedBoardException([lock_info])
-
-        assert return_code == 0, "board should have locked successfully; unknown error."
-
-        lock_info = await self._lock_info(self.chosen_board)
-        log.info(f"Acquired lock: {lock_info}")
-
-    async def _release_lock(self):
-        assert self.chosen_board is not None
-
-        lock_info = await self._lock_info(self.chosen_board)
-        # someone else might have grabbed and affected our tests... not great.
-        assert "LOCKED" in lock_info, "somehow we don't have a lock - did we timeout?"
-
-        release_lock = await asyncio.create_subprocess_exec(
-            # fmt: off
-            "mq.sh", "sem",
-            "-signal", self.chosen_board,
-            "-k", self.job_key,
-            # fmt: on
-            stdout=None,  # inherit -> print
-            stderr=None,  # inherit -> print
-        )
-
-        return_code = await release_lock.wait()
-        assert return_code == 0, "couldn't unlock board for unknown reason"
-
-        lock_info = await self._lock_info(self.chosen_board)
-        log.info(f"Released lock: {lock_info}")
-
-    async def start(self):
-        assert self.process is None, "start() should only be called once"
-
-        self.chosen_board = await self._find_available_board()
-        await self._acquire_lock()
-
-        self.process = await asyncio.create_subprocess_exec(
-            # fmt: off
-            "mq.sh", "run",
-            "-n",  # don't touch the lock, we already have it.
-            "-c", "",  # no completion text, so we get stdin as soon as possible
-            "-a",  # keep the board running after "completion" text
-            "-f", self.image_file.resolve(),
-            "-s", self.chosen_board,
-            # fmt: on
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=STDOUT,
-        )
+        else:
+            raise LockedBoardException(self.boards)
 
         # NOTE: This includes the time for the machine queue to retry booting
         #       a few times due to spurious failures that occur.
@@ -162,18 +109,40 @@ class MachineQueueBackend(HardwareBackend):
             await wait_for_output(self, self.image_started)
 
     async def stop(self):
-        if self.process is None:
-            return
+        # Unfortunately, python's asyncio subprocess modules are very broken
+        # and don't like killing-a-process and then waiting for it to complete.
+        # In this situation, we perform SIGKILL, and then we perform a manual
+        # lock cleanup afterwards.
+        if self.process is not None:
+            try:
+                self.process.kill()
+                self.process._transport.close()
+            except Exception as e:
+                log.info(f"Process {self.process!r}")
 
         await self._release_lock()
 
-        try:
-            # Use SIGHUP to close the console
-            self.process.send_signal(SIGHUP)
-            # Use transport.close() because await process.wait() deadlocks
-            self.process._transport.close()  # type: ignore
-        except ProcessLookupError:
-            pass
+    async def _release_lock(self):
+        # Do nothing if we have no board.
+        if self.chosen_board is None:
+            return
+
+        exe_args = [
+            # fmt: off
+            "mq.sh", "sem",
+            "-signal", self.chosen_board,
+            "-k", self.job_key,
+            # fmt: on
+        ]
+        log.info(shlex.join(exe_args))
+        release_lock = await asyncio.create_subprocess_exec(
+            *exe_args,
+            stdout=None,  # inherit -> print
+            stderr=None,  # inherit -> print
+        )
+
+        # Ignore the return code as we unconditionally try to unlock.
+        await release_lock.wait()
 
     @property
     def input_stream(self) -> asyncio.StreamWriter:
