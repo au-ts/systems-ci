@@ -15,7 +15,6 @@ import contextlib
 from datetime import datetime
 import itertools
 from pathlib import Path
-import time
 import traceback
 from typing import Any, ContextManager, Coroutine, Literal, Optional, Tuple
 
@@ -101,7 +100,7 @@ class ArgparseActionList(argparse.Action):
 ResultKind = Literal["pass", "fail", "not_run", "retry", "interrupted"]
 
 
-def _run_test_case(
+async def _run_test_case(
     test: TestCase,
     logs_dir: Optional[Path] = None,
     loader_img_override: Optional[Path] = None,
@@ -117,61 +116,48 @@ def _run_test_case(
     else:
         log_file_cm = contextlib.nullcontext()
 
-    try:
-        with log_file_cm:
-            # The structure here (double stop) is to work around limitations of
-            # Python's asyncios framework (specifically gh-103847 affected by
-            # the patches bpo-39622/gh-32105 in cpython) where the first
-            # ctrl+c will call `task.cancel()`, whereas the second will not
-            # cancel it and then just KeyboardInterrupt.
-            # We want our backend stop to always work, so we explicitly run it in a new
-            # asyncio event loop at the end. The cancel can sometimes break
-            # with asyncio.create_subprocess_exec but also infinite while loops.
+    # Please be aware whilst modifying this loop of Python asyncio issues
+    # gh-103847, bpo-39622, gh-32105, gh-119710 and other issues filed in CPython,
+    # with deadlocks in the subprocess modules and cancellation safety issues.
+    with log_file_cm:
+        try:
+            async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
+                try:
+                    await backend.start()
+                    await test.run(backend)
+                except EOFError as e:
+                    raise TestFailureException(
+                        "EOF when reading from backend stream"
+                    ) from e
+                except asyncio.IncompleteReadError as e:
+                    raise TestFailureException(
+                        f"EOF when reading from backend stream: {e}"
+                    ) from e
+                except (TimeoutError, asyncio.TimeoutError) as e:
+                    raise TestFailureException("timeout") from e
+                except asyncio.CancelledError:
+                    log.info("cancelling tests...")
+                    raise
 
-            async def _inner():
-                async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
-                    try:
-                        await backend.start()
-                        await test.run(backend)
-                    except EOFError:
-                        raise TestFailureException(
-                            "EOF when reading from backend stream"
-                        )
-                    except asyncio.IncompleteReadError as e:
-                        raise TestFailureException(
-                            "EOF when reading from backend stream: {}".format(e)
-                        )
-                    except asyncio.CancelledError:
-                        log.info("cancelling tests...")
-                        raise
-                    finally:
-                        reset_terminal()
-                        await asyncio.shield(backend.stop())
+                finally:
+                    reset_terminal()
+                    await backend.stop()
 
-            asyncio.run(_inner())
-            try:
-                reset_terminal()
-                asyncio.run(backend.stop())
-            except Exception as e:
-                log.info("failed to stop backend ('{}'), continuing".format(e))
+        except TestFailureException as e:
+            log.error(f"Test failed: {e}")
+            return "fail"
+        except TestRetryException as e:
+            log.info(f"Retrying later due to transient failure: {e}")
+            return "retry"
+        except KeyboardInterrupt:
+            log.info("Tests cancelled (SIGINT)")
+            return "interrupted"
+        except Exception as e:
+            log.error(f"Test failed (internal exception):\n{traceback.format_exc()}")
+            raise e
 
-    except TestFailureException as e:
-        log.error(f"Test failed: {e}")
-        return "fail"
-    except (TimeoutError, asyncio.TimeoutError):
-        log.error("Test timed out")
-        return "fail"
-    except TestRetryException as e:
-        log.info(f"Retrying later due to transient failure: {e}")
-        return "retry"
-    except KeyboardInterrupt:
-        log.info("Tests cancelled (SIGINT)")
-        return "interrupted"
-    except Exception as e:
-        log.error(f"Test failed (internal exception):\n{traceback.format_exc()}")
-
-    log.info(f"Test passed")
-    return "pass"
+        log.info(f"Test passed")
+        return "pass"
 
 
 def add_runner_arguments(parser: argparse.ArgumentParser) -> None:
@@ -268,7 +254,7 @@ def apply_runner_arguments(
     return tests
 
 
-def execute_tests(
+async def execute_tests_async(
     tests: list[TestCase],
     args: argparse.Namespace,
     test_case_summary_fn: TestCaseSummaryFunction,
@@ -282,7 +268,7 @@ def execute_tests(
     for test_case in tests:
         fmt = test_case.pretty_name()
         log.group_start("Running " + fmt)
-        result = _run_test_case(
+        result = await _run_test_case(
             test_case,
             args.logs_dir,
             args.override_image,
@@ -308,14 +294,14 @@ def execute_tests(
                 f"Retrying (retry {retry + 1}/{args.retry_count}); waiting for {args.retry_delay}s"
             )
             try:
-                time.sleep(args.retry_delay)
+                await asyncio.sleep(args.retry_delay)
             except KeyboardInterrupt:
                 break
 
             for test_config in retry_queue:
                 fmt = test_case.pretty_name()
                 log.group_start("Running " + fmt)
-                result = _run_test_case(
+                result = await _run_test_case(
                     test_case,
                     args.logs_dir,
                     args.override_image,
@@ -356,3 +342,11 @@ def execute_tests(
 
     if len(passing) != len(tests):
         quit(1)
+
+
+def execute_tests(
+    tests: list[TestCase],
+    args: argparse.Namespace,
+    test_case_summary_fn: TestCaseSummaryFunction,
+):
+    asyncio.run(execute_tests_async(tests, args, test_case_summary_fn))
