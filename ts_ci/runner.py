@@ -149,7 +149,7 @@ async def _run_test_case(
         except TestRetryException as e:
             log.info(f"Retrying later due to transient failure: {e}")
             return "retry"
-        except KeyboardInterrupt:
+        except asyncio.CancelledError:
             log.info("Tests cancelled (SIGINT)")
             return "interrupted"
         except Exception as e:
@@ -264,81 +264,91 @@ async def execute_tests_async(
     test_results: dict[TestCase, ResultKind] = {}
     do_retries = False
     retry_queue: list[TestCase] = []
+    was_sigint = False
 
-    for test_case in tests:
-        fmt = test_case.pretty_name()
-        log.group_start("Running " + fmt)
-        result = await _run_test_case(
-            test_case,
-            args.logs_dir,
-            args.override_image,
-        )
-        log.group_end("Finished running " + fmt)
+    try:
 
-        test_results[test_case] = result
-
-        if result == "interrupted" or (result != "pass" and args.fast_fail):
-            do_retries = False
-            break
-        elif result == "retry":
-            do_retries = True
-            retry_queue.append(test_case)
-
-    if do_retries:
-        for retry in range(args.retry_count):
-            if len(retry_queue) == 0:
-                break
-
-            next_retry_queue: list[TestCase] = []
-            log.info(
-                f"Retrying (retry {retry + 1}/{args.retry_count}); waiting for {args.retry_delay}s"
+        for test_case in tests:
+            fmt = test_case.pretty_name()
+            log.group_start("Running " + fmt)
+            result = await _run_test_case(
+                test_case,
+                args.logs_dir,
+                args.override_image,
             )
-            try:
-                await asyncio.sleep(args.retry_delay)
-            except KeyboardInterrupt:
+            log.group_end("Finished running " + fmt)
+
+            test_results[test_case] = result
+
+            if result == "interrupted" or (result != "pass" and args.fast_fail):
+                do_retries = False
                 break
+            elif result == "retry":
+                do_retries = True
+                retry_queue.append(test_case)
 
-            for test_config in retry_queue:
-                fmt = test_case.pretty_name()
-                log.group_start("Running " + fmt)
-                result = await _run_test_case(
-                    test_case,
-                    args.logs_dir,
-                    args.override_image,
+        if do_retries:
+            for retry in range(args.retry_count):
+                if len(retry_queue) == 0:
+                    break
+
+                next_retry_queue: list[TestCase] = []
+                log.info(
+                    f"Retrying (retry {retry + 1}/{args.retry_count}); waiting for {args.retry_delay}s"
                 )
-                log.group_end("Finished running " + fmt)
+                try:
+                    await asyncio.sleep(args.retry_delay)
+                except KeyboardInterrupt:
+                    break
 
-                test_results[test_config] = result
+                for test_config in retry_queue:
+                    fmt = test_case.pretty_name()
+                    log.group_start("Running " + fmt)
+                    result = await _run_test_case(
+                        test_case,
+                        args.logs_dir,
+                        args.override_image,
+                    )
+                    log.group_end("Finished running " + fmt)
 
-                if result == "retry":
-                    next_retry_queue.append(test_config)
+                    test_results[test_config] = result
 
-            retry_queue = next_retry_queue
+                    if result == "retry":
+                        next_retry_queue.append(test_config)
 
-    passing, failing, retry_failures, not_run = [], [], [], []
-    for test_case in tests:
-        result = test_results.get(test_case, "not_run")
-        if result == "pass":
-            passing.append(test_case)
-        elif result == "fail" or result == "interrupted":
-            failing.append(test_case)
-        elif result == "retry":
-            retry_failures.append(test_case)
-        elif result == "not_run":
-            not_run.append(test_case)
-        else:
-            assert False, "impossible"
+                retry_queue = next_retry_queue
 
-    print("==== Passing ====")
-    print(test_case_summary_fn(passing))
-    print("==== Failed =====")
-    print(test_case_summary_fn(failing))
-    if len(not_run) != 0:
-        print("===== Cancelled (not run) =====")
-        print(test_case_summary_fn(not_run))
-    if len(retry_failures) != 0:
-        print("===== Transient failures remaining after multiple retries ====")
-        print(test_case_summary_fn(retry_failures))
+    except asyncio.CancelledError:
+        was_sigint = True
+
+    finally:
+        passing, failing, retry_failures, not_run = [], [], [], []
+        for test_case in tests:
+            result = test_results.get(test_case, "not_run")
+            if result == "pass":
+                passing.append(test_case)
+            elif result == "fail" or result == "interrupted":
+                failing.append(test_case)
+            elif result == "retry":
+                retry_failures.append(test_case)
+            elif result == "not_run":
+                not_run.append(test_case)
+            else:
+                assert False, "impossible"
+
+        print("==== Passing ====")
+        print(test_case_summary_fn(passing))
+        print("==== Failed =====")
+        print(test_case_summary_fn(failing))
+        if len(not_run) != 0:
+            print("===== Cancelled (not run) =====")
+            print(test_case_summary_fn(not_run))
+        if len(retry_failures) != 0:
+            print("===== Transient failures remaining after multiple retries ====")
+            print(test_case_summary_fn(retry_failures))
+
+    if was_sigint:
+        quit(130)
 
     if len(passing) != len(tests):
         quit(1)
