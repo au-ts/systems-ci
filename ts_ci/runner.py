@@ -267,61 +267,40 @@ async def execute_tests_async(
     assert len(tests) > 0, "Test list is empty."
 
     test_results: dict[TestCase, ResultKind] = {}
-    do_retries = False
-    retry_queue: list[TestCase] = []
     was_sigint = False
 
+    RETRIES = 1 if args.fast_fail else args.retry_count
+
     try:
-
-        for test_case in tests:
-            fmt = test_case.pretty_name()
-            log.group_start("Running " + fmt)
-            result = await _run_test_case(
-                test_case,
-                args.logs_dir,
-                args.override_image,
-            )
-            log.group_end("Finished running " + fmt)
-
-            test_results[test_case] = result
-
-            if result == "interrupted" or (result != "pass" and args.fast_fail):
-                do_retries = False
+        for retry in range(RETRIES):
+            if was_sigint:
                 break
-            elif result == "retry":
-                do_retries = True
-                retry_queue.append(test_case)
 
-        if do_retries:
-            for retry in range(args.retry_count):
-                if len(retry_queue) == 0:
-                    break
-
-                next_retry_queue: list[TestCase] = []
+            if retry != 0:
                 log.info(
-                    f"Retrying (retry {retry + 1}/{args.retry_count}); waiting for {args.retry_delay}s"
+                    f"Waiting for {args.retry_delay}s and then retrying round {retry + 1}/{RETRIES}"
                 )
-                try:
-                    await asyncio.sleep(args.retry_delay)
-                except KeyboardInterrupt:
+                await asyncio.sleep(args.retry_delay)
+
+            for test_case in tests:
+                if test_results.get(test_case, "retry") != "retry":
+                    # skip any tests that are completed
+                    continue
+
+                fmt = test_case.pretty_name()
+                log.group_start("Running " + fmt)
+                result = await _run_test_case(
+                    test_case,
+                    args.logs_dir,
+                    args.override_image,
+                )
+                log.group_end("Finished running " + fmt)
+
+                test_results[test_case] = result
+
+                if result == "interrupted":
+                    was_sigint = True
                     break
-
-                for test_config in retry_queue:
-                    fmt = test_case.pretty_name()
-                    log.group_start("Running " + fmt)
-                    result = await _run_test_case(
-                        test_case,
-                        args.logs_dir,
-                        args.override_image,
-                    )
-                    log.group_end("Finished running " + fmt)
-
-                    test_results[test_config] = result
-
-                    if result == "retry":
-                        next_retry_queue.append(test_config)
-
-                retry_queue = next_retry_queue
 
     except (asyncio.CancelledError, KeyboardInterrupt):
         was_sigint = True
