@@ -106,9 +106,6 @@ async def _run_test_case(
     loader_img_override: Optional[Path] = None,
 ) -> ResultKind:
 
-    loader_img = loader_img_override or test.loader_img()
-    backend = test.backend(loader_img)
-
     if logs_dir:
         log_file = test.log_file_path(logs_dir, datetime.now())
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -120,7 +117,15 @@ async def _run_test_case(
     # gh-103847, bpo-39622, gh-32105, gh-119710 and other issues filed in CPython,
     # with deadlocks in the subprocess modules and cancellation safety issues.
     with log_file_cm:
+
         try:
+            try:
+                loader_img = loader_img_override or test.loader_img()
+                backend = test.backend(loader_img)
+            except Exception as e:
+                log.error(f"Backend creation failed: {e}")
+                return "fail"
+
             async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
                 try:
                     await backend.start()
@@ -149,7 +154,7 @@ async def _run_test_case(
         except TestRetryException as e:
             log.info(f"Retrying later due to transient failure: {e}")
             return "retry"
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, KeyboardInterrupt):
             log.info("Tests cancelled (SIGINT)")
             return "interrupted"
         except Exception as e:
@@ -318,7 +323,7 @@ async def execute_tests_async(
 
                 retry_queue = next_retry_queue
 
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, KeyboardInterrupt):
         was_sigint = True
 
     finally:
