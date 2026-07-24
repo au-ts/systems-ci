@@ -276,6 +276,9 @@ async def execute_tests_async(
             if was_sigint:
                 break
 
+            if all(test_results.get(tc, "retry") != "retry" for tc in tests):
+                break
+
             if retry != 0:
                 log.info(
                     f"Waiting for {args.retry_delay}s and then retrying round {retry + 1}/{RETRIES}"
