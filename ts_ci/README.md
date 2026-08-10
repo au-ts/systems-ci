@@ -10,7 +10,7 @@ system that has the following requirements:
 - Interacting testing over serial.
 - Produces log files for all actions for later viewing.
 
-We target Python 3.9 for compatibility with our macOS runner.
+We target the oldest non-EOL Python version, which is currently 3.10.
 
 ## Supporting a new project
 
