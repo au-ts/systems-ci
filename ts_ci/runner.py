@@ -126,27 +126,28 @@ async def _run_test_case(
                 log.error(f"Backend creation failed: {e}")
                 return "fail"
 
-            async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
-                try:
+            try:
+                async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
                     await backend.start()
                     await test.run(backend)
-                except EOFError as e:
-                    raise TestFailureException(
-                        "EOF when reading from backend stream"
-                    ) from e
-                except asyncio.IncompleteReadError as e:
-                    raise TestFailureException(
-                        f"EOF when reading from backend stream: {e}"
-                    ) from e
-                except (TimeoutError, asyncio.TimeoutError) as e:
-                    raise TestFailureException("timeout") from e
-                except asyncio.CancelledError:
-                    log.info("cancelling tests...")
-                    raise
 
-                finally:
-                    reset_terminal()
-                    await backend.stop()
+            except EOFError as e:
+                raise TestFailureException(
+                    "EOF when reading from backend stream"
+                ) from e
+            except asyncio.IncompleteReadError as e:
+                raise TestFailureException(
+                    f"EOF when reading from backend stream: {e}"
+                ) from e
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                raise TestFailureException("timeout") from e
+            except asyncio.CancelledError:
+                log.info("cancelling tests...")
+                raise
+
+            finally:
+                reset_terminal()
+                await backend.stop()
 
         except TestFailureException as e:
             log.error(f"Test failed: {e}")
