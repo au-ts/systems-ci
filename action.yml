@@ -17,10 +17,11 @@ runs:
   using: "composite"
   steps:
     - name: Checkout the systems-ci repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: au-ts/systems-ci
         path: ${{ inputs.path }}
+        persist-credentials: false
 
     - name: Update systems-ci with 'test with' description
       if: ${{ github.event_name == 'pull_request' }}
