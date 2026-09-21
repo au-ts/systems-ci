@@ -99,6 +99,10 @@ class MachineQueueBackend(HardwareBackend):
             except TestFailureException as e:
                 stdout, _ = await self.process.communicate()
                 OUTPUT.write(stdout)
+                # communicate() will wait until the process has died, so
+                # reset our variables tracking the process / lock-ness.
+                self.process = None
+                self.chosen_board = None
 
         else:
             raise LockedBoardException(self.boards)
@@ -118,7 +122,7 @@ class MachineQueueBackend(HardwareBackend):
                 self.process.kill()
                 self.process._transport.close()
             except Exception as e:
-                log.info(f"Process {self.process!r}")
+                log.info(f"Failed to stop process {self.process!r}")
 
         await self._release_lock()
 
