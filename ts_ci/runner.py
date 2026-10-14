@@ -150,7 +150,7 @@ async def _run_test_case(
                 await backend.stop()
 
         except TestFailureException as e:
-            log.error(f"Test failed: {e}")
+            log.error(f"Test failed: {e}\n{traceback.format_exc()}")
             return "fail"
         except TestRetryException as e:
             log.info(f"Retrying later due to transient failure: {e}")
