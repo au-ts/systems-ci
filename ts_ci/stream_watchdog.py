@@ -130,7 +130,7 @@ class StreamWatchdog:
         assert self._state is _State.ENTERED
         assert self._task is not None
 
-        self._task.cancel()
+        self._task.cancel(msg="StreamWatchdog")
         self._state = _State.EXPIRING
         # drop the reference early
         self._timeout_handler = None
@@ -139,7 +139,7 @@ class StreamWatchdog:
     def _insert_timeout_error(exc_val: BaseException) -> None:
         while exc_val.__context__ is not None:
             if isinstance(exc_val.__context__, asyncio.CancelledError):
-                te = TimeoutError()
+                te = TimeoutError("StreamWatchdog")
                 te.__context__ = te.__cause__ = exc_val.__context__
                 exc_val.__context__ = te
                 break
