@@ -127,8 +127,17 @@ async def _run_test_case(
                 return "fail"
 
             try:
+                try:
+                    async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
+                        await backend.start()
+                except (TimeoutError, asyncio.TimeoutError) as e:
+                    # A timeout during backend start indicates some error with
+                    # our Machine Queue, usually.
+                    raise TestRetryException(
+                        f"Failed to start backend:\n{traceback.format_exc()}"
+                    ) from e
+
                 async with StreamWatchdog(test.no_output_timeout_s, OUTPUT):
-                    await backend.start()
                     await test.run(backend)
 
             except EOFError as e:
@@ -140,7 +149,7 @@ async def _run_test_case(
                     f"EOF when reading from backend stream: {e}"
                 ) from e
             except (TimeoutError, asyncio.TimeoutError) as e:
-                raise TestFailureException("timeout") from e
+                raise TestFailureException("timeout: {e}") from e
             except asyncio.CancelledError:
                 log.info("cancelling tests...")
                 raise
