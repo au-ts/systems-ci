@@ -97,12 +97,25 @@ class MachineQueueBackend(HardwareBackend):
                 await expect_output(self, b"Lock acquired, we are allowed to run\n")
                 break
             except TestFailureException as e:
-                stdout, _ = await self.process.communicate()
-                OUTPUT.write(stdout)
-                # communicate() will wait until the process has died, so
-                # reset our variables tracking the process / lock-ness.
-                self.process = None
+                # We know we must not have acquired the lock, so don't try
+                # to release it.
                 self.chosen_board = None
+
+                # Reset the watchdog
+                OUTPUT.touch()
+
+                try:
+                    stdout, _ = await self.process.communicate()
+                    # communicate() will wait until the process has died, so
+                    # reset our variables tracking the process / lock-ness.
+                    self.process = None
+                    OUTPUT.write(stdout)
+                except asyncio.CancelledError as c_e:
+                    if c_e.args == ("StreamWatchdog",):
+                        # In this case, .stop() cleans us up.
+                        pass
+                    else:
+                        raise c_e
 
         else:
             raise LockedBoardException(self.boards)
