@@ -115,7 +115,7 @@ class StreamWatchdog:
                 # Since there are no new cancel requests, we're
                 # handling this.
                 if issubclass(exc_type, asyncio.CancelledError):
-                    raise TimeoutError from exc_val
+                    raise TimeoutError(str(exc_val)) from exc_val
                 elif exc_val is not None:
                     self._insert_timeout_error(exc_val)
                     if isinstance(exc_val, ExceptionGroup):
