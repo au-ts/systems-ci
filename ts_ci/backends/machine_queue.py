@@ -93,10 +93,9 @@ class MachineQueueBackend(HardwareBackend):
 
             try:
                 await expect_output(self, f"Acquiring lock for {board}\n".encode())
-                await expect_output(self, f"Lock for {board} currently free\n".encode())
-                await expect_output(self, b"Lock acquired, we are allowed to run\n")
+                await wait_for_output(self, b"Lock acquired, we are allowed to run\n")
                 break
-            except TestFailureException as e:
+            except (EOFError, TestFailureException):
                 # We know we must not have acquired the lock, so don't try
                 # to release it.
                 self.chosen_board = None
