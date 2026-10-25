@@ -24,6 +24,7 @@ MACHINE_QUEUE_BOARDS: dict[str, list[str]] = {
     "rpi4b_2gb": ["pi4B"],
     "rpi4b_4gb": ["pi4B"],
     "vb_105": ["vb_105"],
+    "rock3b": ["rock3b_1"],
     "rockpro64": ["rockpro64b"],
 }
 
